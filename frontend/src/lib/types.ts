@@ -45,6 +45,7 @@ export interface ColumnDef {
 export interface TableCreate {
   name: string
   columns: ColumnDef[]
+  exclude_auto?: string[]
 }
 
 export interface RowAction {
@@ -71,3 +72,85 @@ export interface SqlResult {
 export interface GeneratedSql {
   sql: string
 }
+
+export interface GenerateSqlRequest {
+  table: string
+  verb: 'select' | 'count' | 'insert' | 'update' | 'delete' | 'upsert'
+  columns?: string[]
+  eq?: Record<string, unknown>
+  where?: [string, string, unknown][]
+  search?: string
+  search_columns?: string[]
+  distinct?: boolean
+  order_by?: string | string[]
+  order_dir?: string
+  limit?: number
+  offset?: number
+  page?: number
+  page_size?: number
+  data?: Record<string, unknown>
+  pk?: Record<string, unknown>
+  conflict_columns?: string[]
+}
+
+export interface GeneratedSqlWithParams {
+  sql: string
+  params: Record<string, unknown>
+}
+
+export interface IndexInfo {
+  name: string
+  columns: string[]
+  unique: boolean
+}
+
+export interface IndexCreate {
+  name: string
+  columns: string[]
+  unique: boolean
+}
+
+export type Cardinality = '1:1' | '1:N' | 'N:1'
+
+export interface ForeignKeyInfo {
+  name: string
+  columns: string[]
+  referred_table: string
+  referred_columns: string[]
+  on_delete: string
+  on_update: string
+  cardinality: Cardinality
+}
+
+export interface ReferencingForeignKeyInfo {
+  table: string
+  name: string
+  columns: string[]
+  referred_columns: string[]
+  on_delete: string
+  on_update: string
+  cardinality: Cardinality
+}
+
+export interface ManyToManyInfo {
+  endpoint: string
+  through: string
+}
+
+export interface TableRelationships {
+  junction: boolean
+  outbound: ForeignKeyInfo[]
+  inbound: ReferencingForeignKeyInfo[]
+  many_to_many: ManyToManyInfo[]
+}
+
+export interface ForeignKeyCreate {
+  name?: string
+  columns: string[]
+  referred_table: string
+  referred_columns: string[]
+  on_delete?: string
+  on_update?: string
+}
+
+export const FK_ACTIONS = ['', 'NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'] as const

@@ -17,10 +17,17 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 interface RowDraft extends ColumnDef {
   key: number
 }
+
+const AUTO_DEFAULT: ColumnDef[] = [
+  { name: '_id', data_type: 'INTEGER', primary_key: true, nullable: false },
+  { name: 'created_at', data_type: 'DATETIME', nullable: false, default: 'CURRENT_TIMESTAMP' },
+  { name: 'updated_at', data_type: 'DATETIME', nullable: false, default: 'CURRENT_TIMESTAMP' },
+]
 
 export function CreateTableDialog({
   open,
@@ -35,23 +42,33 @@ export function CreateTableDialog({
 }) {
   const [name, setName] = useState('')
   const [rows, setRows] = useState<RowDraft[]>([emptyRow(0)])
+  const [autoCols, setAutoCols] = useState<ColumnDef[]>(AUTO_DEFAULT)
   const [busy, setBusy] = useState(false)
 
   const update = (key: number, patch: Partial<RowDraft>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)))
 
+  const hasUserPk = rows.some((r) => r.primary_key)
+
   const submit = async () => {
     if (!name.trim()) return
     setBusy(true)
     try {
+      const userCols = rows.map(({ key: _key, ...col }) => col)
+      const finalAuto = hasUserPk ? autoCols.filter((c) => c.name !== '_id') : autoCols
+      const submitted = [...finalAuto, ...userCols]
+      const submittedNames = new Set(submitted.map((c) => c.name))
+      const excludeAuto = AUTO_DEFAULT.map((c) => c.name).filter((n) => !submittedNames.has(n))
       const table = await api.createTable(connId, {
         name: name.trim(),
-        columns: rows.map(({ key: _key, ...col }) => col),
+        columns: submitted,
+        exclude_auto: excludeAuto,
       })
       toast(`Table "${table.name}" created`, 'success')
       onCreated(table)
       setName('')
       setRows([emptyRow(0)])
+      setAutoCols(AUTO_DEFAULT)
     } catch (err) {
       toast((err as Error).message, 'error')
     } finally {
@@ -83,6 +100,59 @@ export function CreateTableDialog({
             <span className="text-center">Nullable</span>
             <span />
           </div>
+          {autoCols.map((col) => {
+            const locked = col.name === '_id'
+            const replaced = locked && hasUserPk
+            return (
+              <div
+                key={col.name}
+                className={cn(
+                  'grid grid-cols-[1fr_140px_80px_80px_40px] items-center gap-2',
+                  replaced && 'opacity-50'
+                )}
+                title={replaced ? 'Replaced by your primary key — will not be created.' : undefined}
+              >
+                <Input value={col.name} disabled readOnly />
+                <Select value={col.data_type} disabled>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PORTABLE_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <input
+                  type="checkbox"
+                  disabled
+                  className="mx-auto size-4"
+                  checked={col.primary_key ?? false}
+                />
+                <input
+                  type="checkbox"
+                  disabled
+                  className="mx-auto size-4"
+                  checked={col.nullable !== false}
+                />
+                {locked ? (
+                  <span />
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    title="Remove this column"
+                    onClick={() => setAutoCols((prev) => prev.filter((c) => c.name !== col.name))}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                )}
+              </div>
+            )
+          })}
           {rows.map((row, i) => (
             <div key={row.key} className="grid grid-cols-[1fr_140px_80px_80px_40px] items-center gap-2">
               <Input

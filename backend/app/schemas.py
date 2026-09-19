@@ -47,6 +47,7 @@ class ColumnDef(BaseModel):
 class TableCreate(BaseModel):
     name: str
     columns: list[ColumnDef] = Field(min_length=1)
+    exclude_auto: list[str] = Field(default_factory=list)
 
 
 class ColumnInfo(BaseModel):
@@ -78,6 +79,94 @@ class SqlResult(BaseModel):
     columns: list[str]
     rows: list[list[Any]]
     rowcount: int
+
+
+# -------------------------------------------------------------------- indexes
+class IndexInfo(BaseModel):
+    name: str
+    columns: list[str]
+    unique: bool
+
+
+class IndexCreate(BaseModel):
+    name: str
+    columns: list[str] = Field(min_length=1)
+    unique: bool = False
+
+
+# ------------------------------------------------------------- foreign keys
+class ForeignKeyCreate(BaseModel):
+    name: str | None = None
+    columns: list[str] = Field(min_length=1)
+    referred_table: str
+    referred_columns: list[str] = Field(min_length=1)
+    on_delete: Literal["", "NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"] = ""
+    on_update: Literal["", "NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"] = ""
+
+
+class ForeignKeyInfo(BaseModel):
+    name: str
+    columns: list[str]
+    referred_table: str
+    referred_columns: list[str]
+    on_delete: str
+    on_update: str
+    cardinality: Literal["1:1", "1:N", "N:1"]
+
+
+class ReferencingForeignKeyInfo(BaseModel):
+    table: str
+    name: str
+    columns: list[str]
+    referred_columns: list[str]
+    on_delete: str
+    on_update: str
+    cardinality: Literal["1:1", "1:N", "N:1"]
+
+
+class ManyToManyInfo(BaseModel):
+    endpoint: str
+    through: str
+
+
+class TableRelationships(BaseModel):
+    junction: bool
+    outbound: list[ForeignKeyInfo]
+    inbound: list[ReferencingForeignKeyInfo]
+    many_to_many: list[ManyToManyInfo]
+
+
+# ---------------------------------------------------------------- sql generate
+class GenerateSql(BaseModel):
+    """Structured request to build a SQL statement from options.
+
+    `verb` selects the generator; unused fields are ignored.
+    """
+
+    table: str
+    verb: Literal["select", "count", "insert", "update", "delete", "upsert"] = "select"
+    # select / count options
+    columns: list[str] | None = None
+    eq: dict[str, Any] | None = None
+    where: list[tuple[str, str, Any]] | None = None
+    search: str | None = None
+    search_columns: list[str] | None = None
+    distinct: bool = False
+    order_by: str | list[str] | None = None
+    order_dir: str = "asc"
+    limit: int | None = None
+    offset: int | None = None
+    page: int | None = None
+    page_size: int | None = None
+    # dml options
+    data: dict[str, Any] | None = None
+    pk: dict[str, Any] | None = None
+    conflict_columns: list[str] | None = None
+
+
+class GeneratedSqlWithParams(BaseModel):
+    sql: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 # -------------------------------------------------------------------------- sql

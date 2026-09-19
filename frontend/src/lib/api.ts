@@ -2,13 +2,19 @@ import type {
   ColumnDef,
   Connection,
   ConnectionCreate,
+  ForeignKeyCreate,
+  GenerateSqlRequest,
   GeneratedSql,
+  GeneratedSqlWithParams,
+  IndexCreate,
+  IndexInfo,
   RowAction,
   RowsOut,
   SqlRequest,
   SqlResult,
   TableCreate,
   TableInfo,
+  TableRelationships,
 } from '@/lib/types'
 
 const BASE = '/api'
@@ -98,8 +104,55 @@ export const api = {
       { method: 'DELETE', body: JSON.stringify(action) }
     ),
 
+  listIndexes: (connId: string, table: string) =>
+    request<IndexInfo[]>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes`
+    ),
+
+  createIndex: (connId: string, table: string, body: IndexCreate) =>
+    request<{ ok: boolean }>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+
+  dropIndex: (connId: string, table: string, index: string) =>
+    request<void>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes/${encodeURIComponent(index)}`,
+      { method: 'DELETE' }
+    ),
+
+  listRelationships: (connId: string, table: string) =>
+    request<TableRelationships>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/relationships`
+    ),
+
+  createForeignKey: (connId: string, table: string, body: ForeignKeyCreate) =>
+    request<{ ok: boolean }>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/foreign_keys`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+
+  dropForeignKey: (connId: string, table: string, name: string) =>
+    request<void>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/foreign_keys/${encodeURIComponent(name)}`,
+      { method: 'DELETE' }
+    ),
+
+  listViews: (connId: string) => request<string[]>(`/connections/${connId}/views`),
+
+  viewRows: (connId: string, view: string) =>
+    request<RowsOut>(
+      `/connections/${connId}/views/${encodeURIComponent(view)}/rows`
+    ),
+
   runSql: (connId: string, body: SqlRequest) =>
     request<SqlResult>(`/connections/${connId}/sql`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  generateSql: (connId: string, body: GenerateSqlRequest) =>
+    request<GeneratedSqlWithParams>(`/connections/${connId}/generate`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
