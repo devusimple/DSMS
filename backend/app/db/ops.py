@@ -10,7 +10,13 @@ from __future__ import annotations
 from sqlalchemy import MetaData, Table, inspect, text
 
 from app.db.manager import ConnectionRecord
-from app.sqlgen import quote_ident
+from app.schemadiff import TableSnapshot
+from app.sqlgen import (
+    ColumnSpec,
+    ForeignKeySpec,
+    IndexSpec,
+    quote_ident,
+)
 
 
 def table_exists(record: ConnectionRecord, table_name: str) -> bool:
@@ -115,6 +121,86 @@ def fk_name(fk, table_name: str) -> str:
         return fk.name
     local = [c.name for c in fk.columns]
     return f"fk_{table_name}_{fk.referred_table.name}_{'_'.join(local)}"
+
+
+def reflect_columns(record: ConnectionRecord, table_name: str) -> list[ColumnSpec]:
+    """Reflect a table's columns as ColumnSpecs (inline single-column unique
+    flags only; composite uniques surface as indexes instead)."""
+    insp = inspect(record.engine)
+    pk_set = set(insp.get_pk_constraint(table_name).get("constrained_columns") or [])
+    inline_unique: set[str] = set()
+    for constraint in insp.get_unique_constraints(table_name):
+        names = constraint.get("column_names") or []
+        if len(names) == 1:
+            inline_unique.update(names)
+    columns = []
+    for col in insp.get_columns(table_name):
+        default = col.get("default")
+        if default is not None:
+            default = str(default)
+        is_pk = col["name"] in pk_set
+        columns.append(
+            ColumnSpec(
+                name=col["name"],
+                data_type=str(col["type"]),
+                primary_key=is_pk,
+                nullable=bool(col.get("nullable", True)) and not is_pk,
+                unique=col["name"] in inline_unique,
+                default=default,
+            )
+        )
+    return columns
+
+
+def reflect_indexes(record: ConnectionRecord, table_name: str) -> list[IndexSpec]:
+    """Reflect a table's indexes, skipping engine-owned ones (sqlite_autoindex)."""
+    indexes = []
+    for index in list_indexes(record, table_name):
+        if index["name"].startswith("sqlite_autoindex_"):
+            continue
+        indexes.append(
+            IndexSpec(
+                name=index["name"],
+                columns=list(index["columns"]),
+                unique=index["unique"],
+            )
+        )
+    return indexes
+
+
+def reflect_fks(record: ConnectionRecord, table_name: str) -> list[ForeignKeySpec]:
+    """Reflect a table's foreign keys as specs (unnamed ones get the stable
+    ``fk_<table>_<parent>_<cols>`` name)."""
+    table = reflect_table(record, table_name)
+    specs = []
+    for fk in table.foreign_key_constraints:
+        columns = [c.name for c in fk.columns]
+        specs.append(
+            ForeignKeySpec(
+                name=fk_name(fk, table_name),
+                columns=columns,
+                referred_table=fk.referred_table.name,
+                referred_columns=[e.column.name for e in fk.elements],
+                on_delete=fk.ondelete or "",
+                on_update=fk.onupdate or "",
+            )
+        )
+    return specs
+
+
+def snapshot_schema(record: ConnectionRecord) -> list[TableSnapshot]:
+    """Full schema snapshot (tables with columns/indexes/FKs; views excluded)."""
+    snapshots = []
+    for table_name in inspect(record.engine).get_table_names():
+        snapshots.append(
+            TableSnapshot(
+                name=table_name,
+                columns=reflect_columns(record, table_name),
+                indexes=reflect_indexes(record, table_name),
+                foreign_keys=reflect_fks(record, table_name),
+            )
+        )
+    return snapshots
 
 
 def _pk_set(insp, table_name: str) -> set[str]:

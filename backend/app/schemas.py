@@ -73,6 +73,19 @@ class RowAction(BaseModel):
 class RowsOut(BaseModel):
     columns: list[str]
     rows: list[dict[str, Any]]
+    total: int = 0
+
+
+# ------------------------------------------------------------------- columns
+class ColumnUpdate(BaseModel):
+    """Partial column change. ``None`` means "unchanged"; ``clear_default``
+    removes a default (a bare ``default=None`` is ambiguous)."""
+
+    name: str | None = None
+    data_type: str | None = None
+    nullable: bool | None = None
+    default: str | None = None
+    clear_default: bool = False
 
 
 class SqlResult(BaseModel):
@@ -177,3 +190,44 @@ class SqlRun(BaseModel):
 
 class GeneratedSql(BaseModel):
     sql: str
+
+
+# ----------------------------------------------------------------------- diff
+class DiffRequest(BaseModel):
+    """Diff request: make ``source_conn_id``'s schema the desired state and
+    the endpoint's connection the one being migrated."""
+
+    source_conn_id: str
+    include_drops: bool = False
+
+
+class DiffEntryOut(BaseModel):
+    kind: str
+    table: str
+    column: str | None = None
+    detail: str = ""
+    sql: list[str] = Field(default_factory=list)
+
+
+class DiffOut(BaseModel):
+    dialect: Dialect
+    entries: list[DiffEntryOut]
+    sql: str
+
+
+# ------------------------------------------------------------- import/export
+class ImportRequest(BaseModel):
+    csv: str = Field(min_length=1)
+    has_header: bool = True
+    delimiter: str = Field(default=",", min_length=1, max_length=1)
+    dry_run: bool = False
+
+
+class ImportPreview(BaseModel):
+    columns: list[str]
+    total_rows: int
+    sample: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImportResult(BaseModel):
+    inserted: int

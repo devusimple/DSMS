@@ -101,7 +101,16 @@ def _column_sql(col: ColumnSpec, dialect: str, composite_pk: bool = False) -> st
     return " ".join(p for p in parts if p)
 
 
-def create_table_sql(table: TableSpec, dialect: str = "sqlite") -> str:
+def create_table_sql(
+    table: TableSpec,
+    dialect: str = "sqlite",
+    foreign_keys: list[ForeignKeySpec] | None = None,
+) -> str:
+    """Render ``CREATE TABLE`` for ``table``.
+
+    ``foreign_keys`` (optional) are rendered as inline ``CONSTRAINT ... FOREIGN
+    KEY`` clauses — valid on all three supported dialects.
+    """
     if not table.columns:
         raise ValueError("A table must have at least one column.")
     primary_keys = [c.name for c in table.columns if c.primary_key]
@@ -110,11 +119,10 @@ def create_table_sql(table: TableSpec, dialect: str = "sqlite") -> str:
     if composite:
         pk = ", ".join(quote_ident(c, dialect) for c in primary_keys)
         lines.append(f"PRIMARY KEY ({pk})")
+    for fk in foreign_keys or []:
+        lines.append(_fk_clause(fk, dialect))
     body = ",\n    ".join(lines)
-    return (
-        f"CREATE TABLE {quote_ident(table.name, dialect)} (\n"
-        f"    {body}\n);"
-    )
+    return f"CREATE TABLE {quote_ident(table.name, dialect)} (\n    {body}\n);"
 
 
 def drop_table_sql(table_name: str, dialect: str = "sqlite") -> str:
@@ -133,6 +141,67 @@ def drop_column_sql(table_name: str, column_name: str, dialect: str = "sqlite") 
         f"ALTER TABLE {quote_ident(table_name, dialect)} "
         f"DROP COLUMN {quote_ident(column_name, dialect)};"
     )
+
+
+def rename_column_sql(
+    table_name: str, old_name: str, new_name: str, dialect: str = "sqlite"
+) -> str:
+    """Build ``ALTER TABLE ... RENAME COLUMN``.
+
+    Supported natively by SQLite (>= 3.25), PostgreSQL, and MySQL (>= 8.0).
+    On SQLite this form also updates foreign-key definitions in other tables
+    that reference the renamed column.
+    """
+    q = quote_ident
+    return (
+        f"ALTER TABLE {q(table_name, dialect)} "
+        f"RENAME COLUMN {q(old_name, dialect)} TO {q(new_name, dialect)};"
+    )
+
+
+def modify_column_sql(
+    table_name: str, col: ColumnSpec, dialect: str = "sqlite"
+) -> list[str]:
+    """Statements changing a column's type, nullability, or default.
+
+    ``col`` must describe the *target* definition; primary_key/unique flags
+    are ignored (constraint changes are not supported here).
+
+    * postgresql: separate ``ALTER COLUMN`` statements per property.
+    * mysql: one ``MODIFY COLUMN`` statement with the full definition.
+    * sqlite: has no ``ALTER`` for these — callers must use
+      :func:`rebuild_table_sql` instead, which raises here.
+    """
+    validate_ident(col.name)
+    validate_type(col.data_type)
+    q = quote_ident(table_name, dialect)
+    c = quote_ident(col.name, dialect)
+    if dialect == "sqlite":
+        raise ValueError(
+            "SQLite cannot ALTER a column definition in place; "
+            "rebuild the table via rebuild_table_sql()."
+        )
+    if dialect == "mysql":
+        parts = [c, col.data_type.upper()]
+        if not col.nullable:
+            parts.append("NOT NULL")
+        if col.default is not None:
+            parts.append(f"DEFAULT {col.default}")
+        return [f"ALTER TABLE {q} MODIFY COLUMN {' '.join(parts)};"]
+    # postgresql
+    statements = [f"ALTER TABLE {q} ALTER COLUMN {c} TYPE {col.data_type.upper()};"]
+    statements.append(
+        f"ALTER TABLE {q} ALTER COLUMN {c} SET NOT NULL;"
+        if not col.nullable
+        else f"ALTER TABLE {q} ALTER COLUMN {c} DROP NOT NULL;"
+    )
+    if col.default is not None:
+        statements.append(
+            f"ALTER TABLE {q} ALTER COLUMN {c} SET DEFAULT {col.default};"
+        )
+    else:
+        statements.append(f"ALTER TABLE {q} ALTER COLUMN {c} DROP DEFAULT;")
+    return statements
 
 
 def create_index_sql(
@@ -201,9 +270,13 @@ def create_foreign_key_sql(
         ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE;``
     """
     if not columns or len(columns) != len(referred_columns):
-        raise ValueError("columns and referred_columns must be non-empty and match in length.")
+        raise ValueError(
+            "columns and referred_columns must be non-empty and match in length."
+        )
     if on_delete not in FK_ACTIONS or on_update not in FK_ACTIONS:
-        raise ValueError(f"Invalid referential action (got delete={on_delete!r}, update={on_update!r}).")
+        raise ValueError(
+            f"Invalid referential action (got delete={on_delete!r}, update={on_update!r})."
+        )
     local = ", ".join(quote_ident(c, dialect) for c in columns)
     refs = ", ".join(quote_ident(c, dialect) for c in referred_columns)
     statement = (
@@ -230,13 +303,17 @@ def drop_foreign_key_sql(
     validate_ident(constraint_name)
     quoted = quote_ident(constraint_name, dialect)
     if dialect == "mysql":
-        return f"ALTER TABLE {quote_ident(table_name, dialect)} DROP FOREIGN KEY {quoted};"
+        return (
+            f"ALTER TABLE {quote_ident(table_name, dialect)} DROP FOREIGN KEY {quoted};"
+        )
     return f"ALTER TABLE {quote_ident(table_name, dialect)} DROP CONSTRAINT {quoted};"
 
 
 def _fk_clause(fk: ForeignKeySpec, dialect: str) -> str:
     if not fk.columns or len(fk.columns) != len(fk.referred_columns):
-        raise ValueError("columns and referred_columns must be non-empty and match in length.")
+        raise ValueError(
+            "columns and referred_columns must be non-empty and match in length."
+        )
     clause = (
         f"CONSTRAINT {quote_ident(fk.name, dialect)} "
         f"FOREIGN KEY ({', '.join(quote_ident(c, dialect) for c in fk.columns)}) "
@@ -256,9 +333,10 @@ def rebuild_table_sql(
     foreign_keys: list[ForeignKeySpec],
     indexes: list[IndexSpec],
     dialect: str = "sqlite",
+    source_columns: list[str] | None = None,
 ) -> list[str]:
     """Return the statements that recreate ``table`` with updated constraints
-    (SQLite has no ``ALTER`` for foreign keys).
+    (SQLite has no ``ALTER`` for foreign keys or column definitions).
 
     The table is copied to a temporary name, column data is copied verbatim,
     the old table is dropped, the temporary one is renamed back, and indexes
@@ -271,10 +349,18 @@ def rebuild_table_sql(
         indexes: Indexes to recreate after the rename (skip the ones SQLite
             owns, e.g. ``sqlite_autoindex_*``).
         dialect: Target dialect.
+        source_columns: Names of the columns in the *current* table, aligned
+            1:1 with ``columns``. The ``INSERT ... SELECT`` copies
+            ``source_columns[i]`` into ``columns[i]`` — pass a mapping when a
+            column is renamed, and omit a column (with its position pruned
+            from both lists consistently) only when its data is dropped.
+            Defaults to the names in ``columns`` (identity mapping).
 
     Returns:
         Ordered list of SQL statements.
     """
+    if source_columns is not None and len(source_columns) != len(columns):
+        raise ValueError("source_columns must align 1:1 with columns.")
     tmp_name = f"{table_name}_rebuild"
     pks = [c.name for c in columns if c.primary_key]
     composite = len(pks) > 1
@@ -286,23 +372,26 @@ def rebuild_table_sql(
         lines.append(_fk_clause(fk, dialect))
     body = ",\n    ".join(lines)
     column_names = [c.name for c in columns]
+    source = source_columns if source_columns is not None else column_names
 
     statements = [
-        (
-            f"CREATE TABLE {quote_ident(tmp_name, dialect)} (\n"
-            f"    {body}\n);"
-        ),
+        (f"CREATE TABLE {quote_ident(tmp_name, dialect)} (\n    {body}\n);"),
     ]
-    quoted = ", ".join(quote_ident(c, dialect) for c in column_names)
+    target_quoted = ", ".join(quote_ident(c, dialect) for c in column_names)
+    source_quoted = ", ".join(quote_ident(c, dialect) for c in source)
     statements.append(
-        f"INSERT INTO {quote_ident(tmp_name, dialect)} ({quoted}) "
-        f"SELECT {quoted} FROM {quote_ident(table_name, dialect)};"
+        f"INSERT INTO {quote_ident(tmp_name, dialect)} ({target_quoted}) "
+        f"SELECT {source_quoted} FROM {quote_ident(table_name, dialect)};"
     )
     statements.append(f"DROP TABLE {quote_ident(table_name, dialect)};")
-    statements.append(f"ALTER TABLE {quote_ident(tmp_name, dialect)} RENAME TO {quote_ident(table_name, dialect)};")
+    statements.append(
+        f"ALTER TABLE {quote_ident(tmp_name, dialect)} RENAME TO {quote_ident(table_name, dialect)};"
+    )
     for index in indexes:
         statements.append(
-            create_index_sql(table_name, index.name, index.columns, index.unique, dialect)
+            create_index_sql(
+                table_name, index.name, index.columns, index.unique, dialect
+            )
         )
     return statements
 
@@ -425,8 +514,7 @@ def delete_row_sql(
         wheres.append(f"{quote_ident(k, dialect)} = :{param}")
         params[param] = v
     sql = (
-        f"DELETE FROM {quote_ident(table_name, dialect)} "
-        f"WHERE {' AND '.join(wheres)};"
+        f"DELETE FROM {quote_ident(table_name, dialect)} WHERE {' AND '.join(wheres)};"
     )
     return sql, params
 
@@ -469,7 +557,9 @@ def _like_pattern(value: object) -> str:
     return f"%{raw}%"
 
 
-def _condition_sql(col: str, op: str, value: object, params: dict[str, object], dialect: str) -> str:
+def _condition_sql(
+    col: str, op: str, value: object, params: dict[str, object], dialect: str
+) -> str:
     """Render one ``col op value`` predicate, binding the value if needed."""
     q = quote_ident(col, dialect)
     if op == "IS NULL":
@@ -509,8 +599,12 @@ def _filters_sql(
     params: dict[str, object] = {}
     parts: list[str] = []
     for col, value in (eq or {}).items():
-        parts.append(_condition_sql(col, "=" if value is not None else "IS NULL", value, params, dialect))
-    for col, op, value in (where or []):
+        parts.append(
+            _condition_sql(
+                col, "=" if value is not None else "IS NULL", value, params, dialect
+            )
+        )
+    for col, op, value in where or []:
         sql_op = _OPS.get(op)
         if sql_op is None:
             raise ValueError(f"Unsupported operator {op!r}.")
@@ -518,7 +612,9 @@ def _filters_sql(
     if search is not None:
         cols = list(search_columns) if search_columns is not None else []
         if not cols:
-            raise ValueError("search requires `search_columns` (the columns to search).")
+            raise ValueError(
+                "search requires `search_columns` (the columns to search)."
+            )
         searched: list[str] = []
         for col in cols:
             param = f"__f{len(params)}"
@@ -554,7 +650,9 @@ def _pagination_sql(
     if offset is not None and offset < 0:
         raise ValueError("offset must be >= 0.")
     if offset is not None and limit is None:
-        raise ValueError("OFFSET requires LIMIT (or use page/page_size) for portability.")
+        raise ValueError(
+            "OFFSET requires LIMIT (or use page/page_size) for portability."
+        )
     return limit, offset
 
 
@@ -730,14 +828,20 @@ def upsert_row_sql(
     update_cols = [c for c in data if c not in conflict_set]
     if dialect == "mysql":
         if not update_cols:
-            raise ValueError("UPSERT needs at least one updateable (non-conflict) column.")
+            raise ValueError(
+                "UPSERT needs at least one updateable (non-conflict) column."
+            )
         update = ", ".join(
-            f"{quote_ident(c, dialect)} = VALUES({quote_ident(c, dialect)})" for c in update_cols
+            f"{quote_ident(c, dialect)} = VALUES({quote_ident(c, dialect)})"
+            for c in update_cols
         )
         return f"{insert_frag} ON DUPLICATE KEY UPDATE {update};", params
     if not update_cols:
         raise ValueError("UPSERT needs at least one updateable (non-conflict) column.")
-    update = ", ".join(f"{quote_ident(c, dialect)} = excluded.{quote_ident(c, dialect)}" for c in update_cols)
+    update = ", ".join(
+        f"{quote_ident(c, dialect)} = excluded.{quote_ident(c, dialect)}"
+        for c in update_cols
+    )
     return f"{insert_frag} ON CONFLICT ({conflict}) DO UPDATE SET {update};", params
 
 
@@ -749,6 +853,10 @@ def upsert_row_sql(
 #   drop_table_sql(table, dialect)     — DROP TABLE
 #   add_column_sql(table, col, dialect)  — ALTER TABLE ... ADD COLUMN
 #   drop_column_sql(table, col, dialect) — ALTER TABLE ... DROP COLUMN
+#   rename_column_sql(table, old, new, dialect) — ALTER TABLE ... RENAME COLUMN
+#   modify_column_sql(table, col, dialect) — type/nullability/default change
+#                          (postgresql: ALTER COLUMN ...; mysql: MODIFY COLUMN;
+#                           sqlite: use rebuild_table_sql instead)
 #   create_index_sql(table, index, cols, unique, dialect) — CREATE [UNIQUE] INDEX
 #   drop_index_sql(table, index, dialect) — DROP INDEX (mysql: ... ON table)
 #   create_foreign_key_sql(table, name, cols, ref_table, ref_cols,

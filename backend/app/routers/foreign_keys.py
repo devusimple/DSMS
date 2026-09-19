@@ -8,16 +8,14 @@ drop → rename) via ``sqlgen.rebuild_table_sql`` there.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 
 from app.db import ops
 from app.db.manager import ConnectionRecord
 from app.routers.deps import get_connection
 from app.schemas import ForeignKeyCreate, TableRelationships
 from app.sqlgen import (
-    ColumnSpec,
     ForeignKeySpec,
-    IndexSpec,
     create_foreign_key_sql,
     drop_foreign_key_sql,
     rebuild_table_sql,
@@ -62,7 +60,7 @@ def create_foreign_key(
     )
     try:
         if record.dialect == "sqlite":
-            existing = _reflect_fk_specs(record, table_name)
+            existing = ops.reflect_fks(record, table_name)
             _run_fk_change(record, table_name, existing + [new_fk])
         else:
             _run_fk_change(record, table_name, [new_fk])
@@ -85,7 +83,7 @@ def drop_foreign_key(
     if not fk_name:
         raise HTTPException(status_code=404, detail="Foreign key name is required.")
     if record.dialect == "sqlite":
-        current = _reflect_fk_specs(record, table_name)
+        current = ops.reflect_fks(record, table_name)
         remaining = [s for s in current if _spec_name(s, table_name) != fk_name]
         if len(remaining) == len(current):
             raise HTTPException(status_code=404, detail=f"Foreign key {fk_name!r} not found.")
@@ -125,69 +123,6 @@ def _spec_name(spec: ForeignKeySpec, table_name: str) -> str:
     return f"fk_{table_name}_{spec.referred_table}_{'_'.join(spec.columns)}"
 
 
-def _reflect_fk_specs(record: ConnectionRecord, table_name: str) -> list[ForeignKeySpec]:
-    """Reflect existing FKs as specs (used for the SQLite rebuild path)."""
-    table = ops.reflect_table(record, table_name)
-    specs = []
-    for fk in table.foreign_key_constraints:
-        columns = [c.name for c in fk.columns]
-        referred_columns = [e.column.name for e in fk.elements]
-        name = fk.name or f"fk_{table_name}_{fk.referred_table.name}_{'_'.join(columns)}"
-        specs.append(
-            ForeignKeySpec(
-                name=name,
-                columns=columns,
-                referred_table=fk.referred_table.name,
-                referred_columns=referred_columns,
-                on_delete=fk.ondelete or "",
-                on_update=fk.onupdate or "",
-            )
-        )
-    return specs
-
-
-def _rebuild_columns(record: ConnectionRecord, table_name: str) -> list[ColumnSpec]:
-    insp = inspect(record.engine)
-    pk_set = set(insp.get_pk_constraint(table_name).get("constrained_columns") or [])
-    inline_unique: set[str] = set()
-    for constraint in insp.get_unique_constraints(table_name):
-        names = constraint.get("column_names") or []
-        if len(names) == 1:
-            inline_unique.update(names)
-    columns = []
-    for col in insp.get_columns(table_name):
-        default = col.get("default")
-        if default is not None:
-            default = str(default)
-        is_pk = col["name"] in pk_set
-        columns.append(
-            ColumnSpec(
-                name=col["name"],
-                data_type=str(col["type"]),
-                primary_key=is_pk,
-                nullable=bool(col.get("nullable", True)) and not is_pk,
-                unique=col["name"] in inline_unique,
-                default=default,
-            )
-        )
-    return columns
-
-
-def _rebuild_indexes(record: ConnectionRecord, table_name: str) -> list[IndexSpec]:
-    indexes = []
-    for index in ops.list_indexes(record, table_name):
-        if index["name"].startswith("sqlite_autoindex_"):
-            continue
-        indexes.append(
-            IndexSpec(
-                name=index["name"],
-                columns=index["columns"],
-                unique=index["unique"],
-            )
-        )
-    return indexes
-
-
 def _run_fk_change(record: ConnectionRecord, table_name: str, foreign_keys: list[ForeignKeySpec]) -> None:
     """Apply a FK change. ``postgresql``/``mysql`` use ``ALTER``; ``sqlite``
     rebuilds the table."""
@@ -214,9 +149,9 @@ def _run_fk_change(record: ConnectionRecord, table_name: str, foreign_keys: list
 
     statements = rebuild_table_sql(
         table_name,
-        _rebuild_columns(record, table_name),
+        ops.reflect_columns(record, table_name),
         foreign_keys,
-        _rebuild_indexes(record, table_name),
+        ops.reflect_indexes(record, table_name),
         record.dialect,
     )
     with record.engine.begin() as conn:
