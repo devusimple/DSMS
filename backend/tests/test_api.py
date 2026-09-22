@@ -1,7 +1,6 @@
 """API integration tests running against an in-memory SQLite connection."""
 
 import json
-import os
 import tempfile
 
 
@@ -44,9 +43,19 @@ def _create_table(client, conn_id, name="users"):
         json={
             "name": name,
             "columns": [
-                {"name": "id", "data_type": "INTEGER", "primary_key": True, "nullable": False},
+                {
+                    "name": "id",
+                    "data_type": "INTEGER",
+                    "primary_key": True,
+                    "nullable": False,
+                },
                 {"name": "name", "data_type": "VARCHAR", "nullable": False},
-                {"name": "age", "data_type": "INTEGER", "nullable": True, "default": "0"},
+                {
+                    "name": "age",
+                    "data_type": "INTEGER",
+                    "nullable": True,
+                    "default": "0",
+                },
             ],
         },
     )
@@ -62,7 +71,9 @@ def test_create_and_list_tables(client, mem_conn):
     assert columns["id"]["nullable"] is False
     assert columns["age"]["nullable"] is True
 
-    names = [t["name"] for t in client.get(f"/api/connections/{mem_conn}/tables").json()]
+    names = [
+        t["name"] for t in client.get(f"/api/connections/{mem_conn}/tables").json()
+    ]
     assert "users" in names
 
 
@@ -78,7 +89,10 @@ def test_duplicate_table_conflict(client, mem_conn):
 def test_create_adds_auto_columns(client, mem_conn):
     res = client.post(
         f"/api/connections/{mem_conn}/tables",
-        json={"name": "notes", "columns": [{"name": "body", "data_type": "TEXT", "nullable": False}]},
+        json={
+            "name": "notes",
+            "columns": [{"name": "body", "data_type": "TEXT", "nullable": False}],
+        },
     )
     assert res.status_code == 201, res.text
     cols = {c["name"]: c for c in res.json()["columns"]}
@@ -92,7 +106,11 @@ def test_create_adds_auto_columns(client, mem_conn):
 
 def test_create_keeps_user_primary_key(client, mem_conn):
     _create_table(client, mem_conn)
-    users = next(t for t in client.get(f"/api/connections/{mem_conn}/tables").json() if t["name"] == "users")
+    users = next(
+        t
+        for t in client.get(f"/api/connections/{mem_conn}/tables").json()
+        if t["name"] == "users"
+    )
     names = [c["name"] for c in users["columns"]]
     assert "_id" not in names
     assert "created_at" in names and "updated_at" in names
@@ -101,7 +119,10 @@ def test_create_keeps_user_primary_key(client, mem_conn):
 def test_create_does_not_duplicate_auto_columns(client, mem_conn):
     res = client.post(
         f"/api/connections/{mem_conn}/tables",
-        json={"name": "events", "columns": [{"name": "created_at", "data_type": "TEXT"}]},
+        json={
+            "name": "events",
+            "columns": [{"name": "created_at", "data_type": "TEXT"}],
+        },
     )
     assert res.status_code == 201, res.text
     names = [c["name"] for c in res.json()["columns"]]
@@ -209,7 +230,10 @@ def test_run_sql(client, mem_conn):
 
     res = client.post(
         f"/api/connections/{mem_conn}/sql",
-        json={"statement": "SELECT name, age FROM users WHERE age = :age", "params": {"age": 37}},
+        json={
+            "statement": "SELECT name, age FROM users WHERE age = :age",
+            "params": {"age": 37},
+        },
     )
     assert res.status_code == 200
     body = res.json()
@@ -241,8 +265,7 @@ def test_generate_select_sql(client, mem_conn):
     assert res.status_code == 200
     body = res.json()
     assert body["sql"] == (
-        'SELECT "id", "name" FROM "users" WHERE "age" = :__f0 '
-        'LIMIT :__f1 OFFSET :__f2;'
+        'SELECT "id", "name" FROM "users" WHERE "age" = :__f0 LIMIT :__f1 OFFSET :__f2;'
     )
     assert body["params"] == {"__f0": 37, "__f1": 10, "__f2": 10}
 
@@ -274,7 +297,7 @@ def test_generate_all_verbs(client, mem_conn):
 
     body["verb"] = "count"
     res = client.post(f"/api/connections/{mem_conn}/generate", json=body)
-    assert res.json()["sql"].startswith('SELECT COUNT(*) AS count')
+    assert res.json()["sql"].startswith("SELECT COUNT(*) AS count")
 
 
 def test_generate_bad_options_400(client, mem_conn):
@@ -289,7 +312,9 @@ def test_drop_table(client, mem_conn):
     _create_table(client, mem_conn)
     res = client.delete(f"/api/connections/{mem_conn}/tables/users")
     assert res.status_code == 204
-    names = [t["name"] for t in client.get(f"/api/connections/{mem_conn}/tables").json()]
+    names = [
+        t["name"] for t in client.get(f"/api/connections/{mem_conn}/tables").json()
+    ]
     assert "users" not in names
 
 
@@ -307,7 +332,9 @@ def test_create_and_list_indexes(client, mem_conn):
     assert res.status_code == 201, res.text
 
     indexes = client.get(f"/api/connections/{mem_conn}/tables/users/indexes").json()
-    assert any(i["name"] == "idx_users_name" and i["columns"] == ["name"] for i in indexes)
+    assert any(
+        i["name"] == "idx_users_name" and i["columns"] == ["name"] for i in indexes
+    )
 
     res = client.delete(
         f"/api/connections/{mem_conn}/tables/users/indexes/idx_users_name"
@@ -327,7 +354,12 @@ def test_create_index_bad_table_404(client, mem_conn):
 def test_create_index_duplicate_conflict(client, mem_conn):
     _create_table(client, mem_conn)
     body = {"name": "idx_users_name", "columns": ["name"]}
-    assert client.post(f"/api/connections/{mem_conn}/tables/users/indexes", json=body).status_code == 201
+    assert (
+        client.post(
+            f"/api/connections/{mem_conn}/tables/users/indexes", json=body
+        ).status_code
+        == 201
+    )
     res = client.post(f"/api/connections/{mem_conn}/tables/users/indexes", json=body)
     assert res.status_code == 400
 
@@ -358,7 +390,12 @@ def _fk_table(client, conn_id, name="posts"):
         json={
             "name": name,
             "columns": [
-                {"name": "id", "data_type": "INTEGER", "primary_key": True, "nullable": False},
+                {
+                    "name": "id",
+                    "data_type": "INTEGER",
+                    "primary_key": True,
+                    "nullable": False,
+                },
                 {"name": "user_id", "data_type": "INTEGER", "nullable": True},
             ],
         },
@@ -392,7 +429,9 @@ def test_create_foreign_key_sqlite_generated_name(client, mem_conn):
     assert fk["cardinality"] == "N:1"
 
     # users sees the inbound reference
-    rel_users = client.get(f"/api/connections/{mem_conn}/tables/users/relationships").json()
+    rel_users = client.get(
+        f"/api/connections/{mem_conn}/tables/users/relationships"
+    ).json()
     assert len(rel_users["inbound"]) == 1
     assert rel_users["inbound"][0]["table"] == "posts"
 
@@ -406,29 +445,59 @@ def test_foreign_key_1to1_cardinality(client, mem_conn):
         json={
             "name": "profiles",
             "columns": [
-                {"name": "user_id", "data_type": "INTEGER", "primary_key": True, "nullable": False},
+                {
+                    "name": "user_id",
+                    "data_type": "INTEGER",
+                    "primary_key": True,
+                    "nullable": False,
+                },
             ],
         },
     )
     res = client.post(
         f"/api/connections/{mem_conn}/tables/profiles/foreign_keys",
-        json={"columns": ["user_id"], "referred_table": "users", "referred_columns": ["id"]},
+        json={
+            "columns": ["user_id"],
+            "referred_table": "users",
+            "referred_columns": ["id"],
+        },
     )
     assert res.status_code == 201, res.text
-    rel = client.get(f"/api/connections/{mem_conn}/tables/profiles/relationships").json()
+    rel = client.get(
+        f"/api/connections/{mem_conn}/tables/profiles/relationships"
+    ).json()
     assert rel["outbound"][0]["cardinality"] == "1:1"
     # users side sees a 1:1 inbound
-    rel_users = client.get(f"/api/connections/{mem_conn}/tables/users/relationships").json()
+    rel_users = client.get(
+        f"/api/connections/{mem_conn}/tables/users/relationships"
+    ).json()
     assert rel_users["inbound"][0]["cardinality"] == "1:1"
 
 
 def test_drop_foreign_key_sqlite(client, mem_conn):
     _create_table(client, mem_conn)
     _fk_table(client, mem_conn)
-    name = f"fk_posts_users_user_id"
-    body = {"name": name, "columns": ["user_id"], "referred_table": "users", "referred_columns": ["id"]}
-    assert client.post(f"/api/connections/{mem_conn}/tables/posts/foreign_keys", json=body).status_code == 201
-    assert len(client.get(f"/api/connections/{mem_conn}/tables/posts/relationships").json()["outbound"]) == 1
+    name = "fk_posts_users_user_id"
+    body = {
+        "name": name,
+        "columns": ["user_id"],
+        "referred_table": "users",
+        "referred_columns": ["id"],
+    }
+    assert (
+        client.post(
+            f"/api/connections/{mem_conn}/tables/posts/foreign_keys", json=body
+        ).status_code
+        == 201
+    )
+    assert (
+        len(
+            client.get(
+                f"/api/connections/{mem_conn}/tables/posts/relationships"
+            ).json()["outbound"]
+        )
+        == 1
+    )
 
     res = client.delete(f"/api/connections/{mem_conn}/tables/posts/foreign_keys/{name}")
     assert res.status_code == 204
@@ -449,7 +518,11 @@ def test_foreign_key_rebuild_preserves_data_and_indexes(client, mem_conn):
     )
     res = client.post(
         f"/api/connections/{mem_conn}/tables/posts/foreign_keys",
-        json={"columns": ["user_id"], "referred_table": "users", "referred_columns": ["id"]},
+        json={
+            "columns": ["user_id"],
+            "referred_table": "users",
+            "referred_columns": ["id"],
+        },
     )
     assert res.status_code == 201, res.text
 
@@ -469,7 +542,12 @@ def test_many_to_many_junction(client, mem_conn):
         json={
             "name": "tags",
             "columns": [
-                {"name": "id", "data_type": "INTEGER", "primary_key": True, "nullable": False},
+                {
+                    "name": "id",
+                    "data_type": "INTEGER",
+                    "primary_key": True,
+                    "nullable": False,
+                },
             ],
         },
     )
@@ -479,15 +557,29 @@ def test_many_to_many_junction(client, mem_conn):
         json={
             "name": "post_tags",
             "columns": [
-                {"name": "post_id", "data_type": "INTEGER", "primary_key": True, "nullable": False},
-                {"name": "tag_id", "data_type": "INTEGER", "primary_key": True, "nullable": False},
+                {
+                    "name": "post_id",
+                    "data_type": "INTEGER",
+                    "primary_key": True,
+                    "nullable": False,
+                },
+                {
+                    "name": "tag_id",
+                    "data_type": "INTEGER",
+                    "primary_key": True,
+                    "nullable": False,
+                },
             ],
         },
     )
     for ref in (("post_id", "posts"), ("tag_id", "tags")):
         res = client.post(
             f"/api/connections/{mem_conn}/tables/post_tags/foreign_keys",
-            json={"columns": [ref[0]], "referred_table": ref[1], "referred_columns": ["id"]},
+            json={
+                "columns": [ref[0]],
+                "referred_table": ref[1],
+                "referred_columns": ["id"],
+            },
         )
         assert res.status_code == 201, res.text
 
@@ -495,7 +587,9 @@ def test_many_to_many_junction(client, mem_conn):
     assert rel["many_to_many"] == [{"endpoint": "tags", "through": "post_tags"}]
     assert rel["junction"] is False
 
-    junction = client.get(f"/api/connections/{mem_conn}/tables/post_tags/relationships").json()
+    junction = client.get(
+        f"/api/connections/{mem_conn}/tables/post_tags/relationships"
+    ).json()
     assert junction["junction"] is True
     assert {m["endpoint"] for m in junction["many_to_many"]} == {"posts", "tags"}
 
@@ -504,10 +598,17 @@ def test_foreign_key_bad_length_400(client, mem_conn):
     _create_table(client, mem_conn)
     res = client.post(
         f"/api/connections/{mem_conn}/tables/users/foreign_keys",
-        json={"columns": ["id"], "referred_table": "users", "referred_columns": ["id", "name"]},
+        json={
+            "columns": ["id"],
+            "referred_table": "users",
+            "referred_columns": ["id", "name"],
+        },
     )
     assert res.status_code == 400
 
 
 def test_relationships_missing_table_404(client, mem_conn):
-    assert client.get(f"/api/connections/{mem_conn}/tables/nope/relationships").status_code == 404
+    assert (
+        client.get(f"/api/connections/{mem_conn}/tables/nope/relationships").status_code
+        == 404
+    )

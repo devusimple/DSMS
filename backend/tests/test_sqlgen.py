@@ -1,8 +1,7 @@
 """Unit tests for the SQL generation module (no DB required)."""
 
 import pytest
-
-from app.sqlgen import (
+from api.sqlgen import (
     ColumnSpec,
     ForeignKeySpec,
     IndexSpec,
@@ -125,7 +124,7 @@ def test_select_projection_and_eq():
 
 def test_select_eq_null_uses_is_null():
     sql, _ = select_rows_sql("users", eq={"deleted_at": None})
-    assert "deleted_at\" IS NULL" in sql
+    assert 'deleted_at" IS NULL' in sql
     assert ":__f0" not in sql
 
 
@@ -140,10 +139,15 @@ def test_select_where_operators():
         ],
     )
     assert '"age" >= :__f0' in sql
-    assert '"email" LIKE :__f1 ESCAPE \'\\\'' in sql
+    assert "\"email\" LIKE :__f1 ESCAPE '\\'" in sql
     assert '"role" IN (:__f2, :__f3)' in sql
     assert '"banned_at" IS NULL' in sql
-    assert params == {"__f0": 18, "__f1": "%@gmail%", "__f2": "admin", "__f3": "moderator"}
+    assert params == {
+        "__f0": 18,
+        "__f1": "%@gmail%",
+        "__f2": "admin",
+        "__f3": "moderator",
+    }
 
 
 def test_select_bad_operator_rejected():
@@ -155,7 +159,9 @@ def test_select_search_or_like():
     sql, params = select_rows_sql(
         "users", search="50%_off", search_columns=["name", "email"]
     )
-    assert "(\"name\" LIKE :__f0 ESCAPE '\\' OR \"email\" LIKE :__f1 ESCAPE '\\')" in sql
+    assert (
+        "(\"name\" LIKE :__f0 ESCAPE '\\' OR \"email\" LIKE :__f1 ESCAPE '\\')" in sql
+    )
     # % and _ in the term must be escaped so they match literally.
     assert params["__f0"] == "%50\\%\\_off%"
     assert params["__f0"].count("\\%") == 1
@@ -180,7 +186,7 @@ def test_select_order_and_pagination():
 
 def test_select_page_page_size():
     sql, params = select_rows_sql("users", page=3, page_size=25)
-    assert sql.endswith('LIMIT :__f0 OFFSET :__f1;')
+    assert sql.endswith("LIMIT :__f0 OFFSET :__f1;")
     assert params == {"__f0": 25, "__f1": 50}
 
 
@@ -200,9 +206,7 @@ def test_select_ident_validation():
 
 
 def test_values_never_inlined():
-    sql, params = select_rows_sql(
-        "users", eq={"name": "Ada' OR '1'='1"}
-    )
+    sql, params = select_rows_sql("users", eq={"name": "Ada' OR '1'='1"})
     assert "Ada" not in sql.replace(":__f0", "")
     assert params == {"__f0": "Ada' OR '1'='1"}
 
@@ -236,8 +240,8 @@ def test_upsert_sqlite():
 def test_upsert_mysql():
     sql, params = upsert_row_sql("users", {"id": 1, "name": "Ada"}, ["id"], "mysql")
     assert sql == (
-        'INSERT INTO `users` (`id`, `name`) VALUES (:__c0, :__c1) '
-        'ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);'
+        "INSERT INTO `users` (`id`, `name`) VALUES (:__c0, :__c1) "
+        "ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);"
     )
     assert params == {"__c0": 1, "__c1": "Ada"}
 
@@ -252,7 +256,14 @@ def test_upsert_requires_conflict_and_update_cols():
 # ------------------------------------------------------------------ foreign keys
 def test_create_foreign_key_sql_postgresql():
     sql = create_foreign_key_sql(
-        "posts", "fk_posts_user", ["user_id"], "users", ["id"], "CASCADE", "", "postgresql"
+        "posts",
+        "fk_posts_user",
+        ["user_id"],
+        "users",
+        ["id"],
+        "CASCADE",
+        "",
+        "postgresql",
     )
     assert sql == (
         'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user" FOREIGN KEY ("user_id") '
@@ -262,11 +273,20 @@ def test_create_foreign_key_sql_postgresql():
 
 def test_create_foreign_key_sql_no_action_omitted():
     sql = create_foreign_key_sql(
-        "posts", "fk_posts_user", ["user_id"], "users", ["id"], "NO ACTION", "NO ACTION", "mysql"
+        "posts",
+        "fk_posts_user",
+        ["user_id"],
+        "users",
+        ["id"],
+        "NO ACTION",
+        "NO ACTION",
+        "mysql",
     )
     assert "ON DELETE" not in sql
     assert "ON UPDATE" not in sql
-    assert sql.startswith("ALTER TABLE `posts` ADD CONSTRAINT `fk_posts_user` FOREIGN KEY")
+    assert sql.startswith(
+        "ALTER TABLE `posts` ADD CONSTRAINT `fk_posts_user` FOREIGN KEY"
+    )
 
 
 def test_drop_foreign_key_sql():
@@ -286,20 +306,26 @@ def test_create_foreign_key_length_mismatch():
 def test_rebuild_table_sql_sqlite():
     statements = rebuild_table_sql(
         "posts",
-        [ColumnSpec("id", "INTEGER", primary_key=True, nullable=False), ColumnSpec("user_id", "INTEGER")],
+        [
+            ColumnSpec("id", "INTEGER", primary_key=True, nullable=False),
+            ColumnSpec("user_id", "INTEGER"),
+        ],
         [ForeignKeySpec("fk_posts_user", ["user_id"], "users", ["id"], "CASCADE", "")],
         [IndexSpec("idx_posts_user", ["user_id"])],
         "sqlite",
     )
     assert statements[0].startswith('CREATE TABLE "posts_rebuild" (')
-    assert "CONSTRAINT \"fk_posts_user\" FOREIGN KEY (\"user_id\") REFERENCES \"users\" (\"id\") ON DELETE CASCADE" in statements[0]
+    assert (
+        'CONSTRAINT "fk_posts_user" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE'
+        in statements[0]
+    )
     assert statements[1] == (
         'INSERT INTO "posts_rebuild" ("id", "user_id") '
         'SELECT "id", "user_id" FROM "posts";'
     )
     assert statements[2] == 'DROP TABLE "posts";'
     assert statements[3] == 'ALTER TABLE "posts_rebuild" RENAME TO "posts";'
-    assert statements[4].startswith("CREATE INDEX \"idx_posts_user\"")
+    assert statements[4].startswith('CREATE INDEX "idx_posts_user"')
 
 
 def test_rebuild_table_sql_composite_pk():

@@ -1,8 +1,7 @@
 import pytest
+from api.db.manager import manager
+from api.main import app
 from fastapi.testclient import TestClient
-
-from app.db.manager import manager
-from app.main import app
 
 
 @pytest.fixture()
