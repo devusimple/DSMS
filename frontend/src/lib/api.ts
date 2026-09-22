@@ -15,145 +15,159 @@ import type {
   TableCreate,
   TableInfo,
   TableRelationships,
-} from '@/lib/types'
+} from "@/lib/types";
 
-const BASE = '/api'
+const BASE = "https://dsms-rouge.vercel.app/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
     ...init,
-  })
+  });
   if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`
+    let message = `${res.status} ${res.statusText}`;
     try {
-      const body = await res.json()
+      const body = await res.json();
       if (body?.detail) {
-        message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+        message =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail);
       }
     } catch {
       /* keep default message */
     }
-    throw new Error(message)
+    throw new Error(message);
   }
-  if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
 }
 
 export const api = {
-  listConnections: () => request<Connection[]>('/connections'),
+  listConnections: () => request<Connection[]>("/connections"),
 
   createConnection: (body: ConnectionCreate) =>
-    request<Connection>('/connections', {
-      method: 'POST',
+    request<Connection>("/connections", {
+      method: "POST",
       body: JSON.stringify(body),
     }),
 
   deleteConnection: (id: string) =>
-    request<void>(`/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    request<void>(`/connections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 
   listTables: (connId: string) =>
     request<TableInfo[]>(`/connections/${connId}/tables`),
 
   createTable: (connId: string, body: TableCreate) =>
     request<TableInfo>(`/connections/${connId}/tables`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(body),
     }),
 
   dropTable: (connId: string, table: string) =>
-    request<void>(`/connections/${connId}/tables/${encodeURIComponent(table)}`, {
-      method: 'DELETE',
-    }),
+    request<void>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}`,
+      {
+        method: "DELETE",
+      },
+    ),
 
   tableSql: (connId: string, table: string) =>
     request<GeneratedSql>(
-      `/connections/${connId}/tables/${encodeURIComponent(table)}/sql`
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/sql`,
     ),
 
   addColumn: (connId: string, table: string, col: ColumnDef) =>
-    request<{ ok: boolean }>(`/connections/${connId}/tables/${encodeURIComponent(table)}/columns`, {
-      method: 'POST',
-      body: JSON.stringify(col),
-    }),
+    request<{ ok: boolean }>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/columns`,
+      {
+        method: "POST",
+        body: JSON.stringify(col),
+      },
+    ),
 
   dropColumn: (connId: string, table: string, column: string) =>
     request<{ ok: boolean }>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/columns/${encodeURIComponent(column)}`,
-      { method: 'DELETE' }
+      { method: "DELETE" },
     ),
 
   listRows: (connId: string, table: string) =>
-    request<RowsOut>(`/connections/${connId}/tables/${encodeURIComponent(table)}/rows`),
+    request<RowsOut>(
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/rows`,
+    ),
 
   insertRow: (connId: string, table: string, action: RowAction) =>
     request<{ rowcount: number; statement: string }>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/rows`,
-      { method: 'POST', body: JSON.stringify(action) }
+      { method: "POST", body: JSON.stringify(action) },
     ),
 
   updateRow: (connId: string, table: string, action: RowAction) =>
     request<{ rowcount: number; statement: string }>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/rows`,
-      { method: 'PUT', body: JSON.stringify(action) }
+      { method: "PUT", body: JSON.stringify(action) },
     ),
 
   deleteRow: (connId: string, table: string, action: RowAction) =>
     request<{ rowcount: number; statement: string }>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/rows`,
-      { method: 'DELETE', body: JSON.stringify(action) }
+      { method: "DELETE", body: JSON.stringify(action) },
     ),
 
   listIndexes: (connId: string, table: string) =>
     request<IndexInfo[]>(
-      `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes`
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes`,
     ),
 
   createIndex: (connId: string, table: string, body: IndexCreate) =>
     request<{ ok: boolean }>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes`,
-      { method: 'POST', body: JSON.stringify(body) }
+      { method: "POST", body: JSON.stringify(body) },
     ),
 
   dropIndex: (connId: string, table: string, index: string) =>
     request<void>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/indexes/${encodeURIComponent(index)}`,
-      { method: 'DELETE' }
+      { method: "DELETE" },
     ),
 
   listRelationships: (connId: string, table: string) =>
     request<TableRelationships>(
-      `/connections/${connId}/tables/${encodeURIComponent(table)}/relationships`
+      `/connections/${connId}/tables/${encodeURIComponent(table)}/relationships`,
     ),
 
   createForeignKey: (connId: string, table: string, body: ForeignKeyCreate) =>
     request<{ ok: boolean }>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/foreign_keys`,
-      { method: 'POST', body: JSON.stringify(body) }
+      { method: "POST", body: JSON.stringify(body) },
     ),
 
   dropForeignKey: (connId: string, table: string, name: string) =>
     request<void>(
       `/connections/${connId}/tables/${encodeURIComponent(table)}/foreign_keys/${encodeURIComponent(name)}`,
-      { method: 'DELETE' }
+      { method: "DELETE" },
     ),
 
-  listViews: (connId: string) => request<string[]>(`/connections/${connId}/views`),
+  listViews: (connId: string) =>
+    request<string[]>(`/connections/${connId}/views`),
 
   viewRows: (connId: string, view: string) =>
     request<RowsOut>(
-      `/connections/${connId}/views/${encodeURIComponent(view)}/rows`
+      `/connections/${connId}/views/${encodeURIComponent(view)}/rows`,
     ),
 
   runSql: (connId: string, body: SqlRequest) =>
     request<SqlResult>(`/connections/${connId}/sql`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(body),
     }),
 
   generateSql: (connId: string, body: GenerateSqlRequest) =>
     request<GeneratedSqlWithParams>(`/connections/${connId}/generate`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(body),
     }),
-}
+};
